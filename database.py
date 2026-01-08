@@ -7,7 +7,7 @@ from sqlalchemy_utils import database_exists, create_database
 # 1. DATABASE URL LOGIC
 # On Render/Railway, they provide a DATABASE_URL environment variable.
 # Locally, it will default to your postgres setup.
-local_url = "postgresql://postgres:yourpassword@localhost:5432/nhl_trivia"
+local_url = "p"
 DATABASE_URL = os.environ.get("DATABASE_URL", local_url)
 
 # Fix for Render/Heroku: they often use 'postgres://' but SQLAlchemy requires 'postgresql://'
@@ -53,3 +53,4 @@ def init_db():
 if __name__ == "__main__":
     # Running this file directly will initialize the DB
     init_db()
+
