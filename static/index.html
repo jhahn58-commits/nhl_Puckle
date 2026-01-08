@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NHL Puckle - The Reveal</title>
+    <style>
+        :root {
+            --correct: #538d4e;
+            --wrong: #3a3a3c;
+            --bg: #121213;
+            --text: #ffffff;
+            --accent: #007bff;
+            --error: #e74c3c;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        .game-header { text-align: center; margin-bottom: 20px; }
+        
+        /* Main Clue Card */
+        .clue-box {
+            background: #1e1e1e;
+            border: 3px solid var(--accent);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            width: 350px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+
+        .jersey-number { font-size: 85px; font-weight: 800; margin: 0; color: var(--accent); line-height: 1; }
+        .team-name { font-size: 26px; font-weight: bold; letter-spacing: 2px; margin-bottom: 15px; color: #ccc; }
+        
+        #player-img {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            filter: blur(20px); /* Initial heavy blur */
+            transition: filter 0.8s ease;
+            background: #333;
+            margin: 15px 0;
+            border: 2px solid #444;
+        }
+
+        /* Game Stats */
+        .status-bar { margin: 20px 0; font-size: 1.1rem; font-weight: bold; }
+        .attempts-left { color: var(--accent); }
+
+        /* Input Section */
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        input {
+            padding: 12px 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #272729;
+            color: white;
+            font-size: 16px;
+            width: 220px;
+            outline: none;
+        }
+        
+        button {
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        
+        #guess-btn { background: var(--correct); color: white; }
+        #give-up-btn { background: var(--error); color: white; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* History */
+        #history { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 8px; }
+        .history-item {
+            background: var(--wrong);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            animation: slideIn 0.3s ease-out;
+        }
+        .history-item.match { background-color: var(--correct); }
+
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="game-header">
+        <h1>🏒 NHL PUCKLE</h1>
+        <p>Identify the player from the hints</p>
+    </div>
+
+    <div class="clue-box" id="main-card">
+        <div class="team-name" id="display-team">LOADING...</div>
+        <div class="jersey-number" id="display-number">--</div>
+        <img id="player-img" src="" alt="Mystery Player">
+        <div id="display-pos" style="color: #888; font-weight: bold;">Position: --</div>
+    </div>
+
+    <div class="status-bar">
+        Guesses Left: <span id="guesses-left" class="attempts-left">5</span>
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="guess-input" list="player-options" placeholder="Search player..." oninput="fetchSuggestions()">
+        <datalist id="player-options"></datalist>
+        <button id="guess-btn" onclick="submitGuess()">GUESS</button>
+        <button id="give-up-btn" onclick="revealAnswer(false)">GIVE UP</button>
+    </div>
+
+    <div id="history"></div>
+
+    <script>
+        let targetPlayer = null;
+        let attempts = 0;
+        const maxAttempts = 5;
+        let isGameOver = false;
+
+        // Load game data from FastAPI
+        async function initGame() {
+            const res = await fetch('/daily-player');
+            targetPlayer = await res.json();
+            
+            document.getElementById('display-team').innerText = targetPlayer.team;
+            document.getElementById('display-number').innerText = targetPlayer.jersey;
+            document.getElementById('display-pos').innerText = `Position: ${targetPlayer.position}`;
+            document.getElementById('player-img').src = targetPlayer.image;
+        }
+
+        // Handle autocomplete
+        async function fetchSuggestions() {
+            if (isGameOver) return;
+            const q = document.getElementById('guess-input').value;
+            if (q.length < 2) return;
+            
+            const res = await fetch(`/search-players?q=${q}`);
+            const players = await res.json();
+            
+            const list = document.getElementById('player-options');
+            list.innerHTML = "";
+            players.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                list.appendChild(opt);
+            });
+        }
+
+        // Process a guess
+        async function submitGuess() {
+            if (isGameOver) return;
+            const val = document.getElementById('guess-input').value.trim();
+            if (!val) return;
+
+            // Fetch to see if this is a valid player name in our DB
+            const res = await fetch(`/search-players?q=${val}`);
+            const players = await res.json();
+            const guessedPlayer = players.find(p => p.name.toLowerCase() === val.toLowerCase());
+
+            if (!guessedPlayer) {
+                alert("Please select a valid NHL player.");
+                return;
+            }
+
+            attempts++;
+            const remaining = maxAttempts - attempts;
+            document.getElementById('guesses-left').innerText = remaining;
+
+            if (guessedPlayer.id === targetPlayer.id) {
+                endGame(true, val);
+            } else {
+                updateHistory(val, false);
+                updateBlur();
+                if (attempts >= maxAttempts) {
+                    revealAnswer(true);
+                }
+            }
+            document.getElementById('guess-input').value = "";
+        }
+
+        function updateBlur() {
+            const currentBlur = 20 - (attempts * 4); // Reduces blur by 4px per guess
+            document.getElementById('player-img').style.filter = `blur(${Math.max(0, currentBlur)}px)`;
+        }
+
+        function updateHistory(name, isMatch) {
+            const history = document.getElementById('history');
+            const item = document.createElement('div');
+            item.className = `history-item ${isMatch ? 'match' : ''}`;
+            item.innerHTML = `<span>${name}</span> <span>${isMatch ? '✅' : '❌'}</span>`;
+            history.prepend(item);
+        }
+
+        function revealAnswer(ranOut) {
+            if (isGameOver) return;
+            const message = ranOut ? "Game Over! You ran out of guesses." : "You gave up!";
+            endGame(false, message);
+        }
+
+        async function endGame(won, detail) {
+            isGameOver = true;
+            document.getElementById('player-img').style.filter = "none";
+            document.getElementById('guess-input').disabled = true;
+            document.getElementById('guess-btn').disabled = true;
+            document.getElementById('give-up-btn').disabled = true;
+
+            // Fetch the actual name to display (our daily-player endpoint only gave hints)
+            // For this logic, we assume the frontend now knows the name via a final check
+            const res = await fetch(`/search-players?q=${targetPlayer.id}`); 
+            // Note: Adjust your backend to return the name for the ID if needed!
+            
+            if (won) {
+                document.getElementById('display-team').innerText = "CORRECT!";
+                document.getElementById('display-team').style.color = "var(--correct)";
+            } else {
+                document.getElementById('display-team').innerText = "GAME OVER";
+                document.getElementById('display-team').style.color = "var(--error)";
+                alert(`${detail} The player was in your database!`);
+            }
+        }
+
+        initGame();
+    </script>
+</body>
+</html>
