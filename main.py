@@ -13,6 +13,9 @@ from sqlalchemy import or_
 from database import SessionLocal, Player
 import random
 
+from database import SessionLocal, Player, init_db
+from sync import sync_nhl_data # Import your sync function
+
 app = FastAPI()
 
 # Enable CORS so your frontend can talk to your backend
@@ -53,6 +56,21 @@ def search_players(q: str, db: Session = Depends(get_db)):
     ).limit(10).all()
     
     return [{"name": p.full_name, "id": p.id} for p in results]
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Create tables
+    init_db()
+    
+    # 2. Check if we have players. If not, sync!
+    db = SessionLocal()
+    player_count = db.query(Player).count()
+    if player_count == 0:
+        print("Database empty! Running initial NHL sync...")
+        sync_nhl_data()
+    db.close()
+    
+    yield
 
 # This serves your HTML file from a folder named "static"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
