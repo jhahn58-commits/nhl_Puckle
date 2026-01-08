@@ -1,33 +1,40 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jan  7 22:15:13 2026
-
-@author: hahnj
-"""
-
-from contextlib import asynccontextmanager 
-from fastapi import FastAPI, Depends
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from database import SessionLocal, Player
+import os
 import random
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
-from database import SessionLocal, Player, init_db
-from sync import sync_nhl_data # Import your sync function
+# Import our local database logic and the Sync script
+from database import SessionLocal, init_db, Player
+from sync import sync_nhl_data
 
-app = FastAPI()
+# 1. LIFESPAN: This runs when Render starts your app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This creates the 'players' table if it doesn't exist
+    init_db()
+    
+    # Check if we have players. If not, trigger the sync.
+    db = SessionLocal()
+    try:
+        player_count = db.query(Player).count()
+        if player_count == 0:
+            print("--- Database empty! Running initial NHL sync ---")
+            sync_nhl_data()
+        else:
+            print(f"--- Database ready with {player_count} players ---")
+    finally:
+        db.close()
+    
+    yield
+    # Cleanup logic (if any) would go here on shutdown
 
-# Enable CORS so your frontend can talk to your backend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 2. INITIALIZE APP
+app = FastAPI(lifespan=lifespan)
 
-# Dependency to get the database session
+# Dependency to get a DB session for our routes
 def get_db():
     db = SessionLocal()
     try:
@@ -35,44 +42,40 @@ def get_db():
     finally:
         db.close()
 
+# 3. ROUTES
+
+# Serve the actual game page
+@app.get("/")
+async def read_index():
+    return FileResponse('static/index.html')
+
+# Endpoint to pick a random player for the daily challenge
 @app.get("/daily-player")
 def get_daily_player(db: Session = Depends(get_db)):
-    players = db.query(Player).all()
-    # For a true Wordle, you'd pick based on the date. For now, it's random.
-    target = random.choice(players)
+    count = db.query(Player).count()
+    if count == 0:
+        raise HTTPException(status_code=404, detail="No players found")
+    
+    # Pick a random player
+    random_index = random.randint(0, count - 1)
+    player = db.query(Player).offset(random_index).first()
+    
     return {
-        "id": target.id,
-        "jersey": target.jersey_number,
-        "team": target.team_abbr,
-        "position": target.position,
-        "image": target.headshot_url
+        "id": player.id,
+        "team": player.team_abbr,
+        "jersey": player.jersey_number,
+        "position": player.position,
+        "image": player.headshot_url,
+        "name": player.full_name # Frontend will hide this until revealed
     }
 
+# Endpoint for the search bar autocomplete
 @app.get("/search-players")
 def search_players(q: str, db: Session = Depends(get_db)):
-    # Search for players where the name matches the query string
-    # We limit to 10 results to keep the dropdown clean and fast
-    results = db.query(Player).filter(
-        Player.full_name.ilike(f"%{q}%")
-    ).limit(10).all()
-    
-    return [{"name": p.full_name, "id": p.id} for p in results]
+    # Search for names containing the string (case-insensitive)
+    results = db.query(Player).filter(Player.full_name.ilike(f"%{q}%")).limit(10).all()
+    return [{"id": p.id, "name": p.full_name} for p in results]
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 1. Create tables
-    init_db()
-    
-    # 2. Check if we have players. If not, sync!
-    db = SessionLocal()
-    player_count = db.query(Player).count()
-    if player_count == 0:
-        print("Database empty! Running initial NHL sync...")
-        sync_nhl_data()
-    db.close()
-    
-    yield
-
-# This serves your HTML file from a folder named "static"
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
+# 4. MOUNT STATIC FILES
+# This must come AFTER your specific routes so it doesn't "swallow" the /daily-player path
+app.mount("/static", StaticFiles(directory="static"), name="static")
