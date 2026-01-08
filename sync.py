@@ -6,6 +6,7 @@ Created on Wed Jan  7 21:54:40 2026
 """
 
 from nhlpy import NHLClient # pip install nhl-api-py
+from database import SessionLocal, Player
 
 def sync_nhl_data():
     client = NHLClient()
