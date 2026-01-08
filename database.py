@@ -1,62 +1,55 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jan  7 21:52:18 2026
-
-@author: hahnj
-"""
-
-from sqlalchemy import Column, Integer, String, create_engine
+import os
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy_utils import database_exists, create_database
 
+# 1. DATABASE URL LOGIC
+# On Render/Railway, they provide a DATABASE_URL environment variable.
+# Locally, it will default to your postgres setup.
+local_url = "postgresql://postgres:yourpassword@localhost:5432/nhl_trivia"
+DATABASE_URL = os.environ.get("DATABASE_URL", local_url)
+
+# Fix for Render/Heroku: they often use 'postgres://' but SQLAlchemy requires 'postgresql://'
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# 2. SETUP ENGINE AND SESSION
+# 'check_same_thread' is only needed for SQLite, but doesn't hurt for Postgres
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# 3. PLAYER MODEL
 class Player(Base):
     __tablename__ = 'players'
-    id = Column(Integer, primary_key=True)
-    full_name = Column(String)
+    
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, index=True)
     jersey_number = Column(Integer)
     position = Column(String)
     team_abbr = Column(String)
     headshot_url = Column(String)
 
-# Connect to your local Postgres or SQLite
-engine = create_engine('postgresql://postgres:antProj891@localhost/nhl_trivia')
-SessionLocal = sessionmaker(bind=engine)
-Base.metadata.create_all(bind=engine)
-
+# 4. INITIALIZATION LOGIC
 def init_db():
-    # This command looks at all your classes (like Player) 
-    # and creates the actual tables in Postgres.
-    Base.metadata.create_all(bind=engine)
-    
-    
-    
-    
-from nhlpy import NHLClient # pip install nhl-api-py
-
-def sync_nhl_data():
-    client = NHLClient()
-    db = SessionLocal()
-    
-    # Get all teams first
-    teams = client.teams.teams()
-    
-    for team in teams:
-        abbr = team['abbr']
-        # Fetch current roster for the 20252026 season
-        roster = client.teams.team_roster(team_abbr=abbr, season="20252026")
+    """
+    Creates the database if it doesn't exist (Postgres only)
+    and creates all tables defined in the models.
+    """
+    try:
+        # Only try to create the database if we are using Postgres
+        if DATABASE_URL.startswith("postgresql"):
+            if not database_exists(engine.url):
+                create_database(engine.url)
+                print("--- Created new database: nhl_trivia ---")
         
-        # Add Forwards, Defensemen, and Goalies to your DB
-        for player_data in roster['forwards'] + roster['defensemen'] + roster['goalies']:
-            player = Player(
-                id=player_data['id'],
-                full_name=player_data['firstName']['default'] + " " + player_data['lastName']['default'],
-                jersey_number=player_data.get('sweaterNumber', 0),
-                position=player_data['positionCode'],
-                team_abbr=abbr,
-                headshot_url=player_data['headshot']
-            )
-            db.merge(player) # merge avoids duplicates
-    db.commit()
-    db.close()
+        # Create tables
+        Base.metadata.create_all(bind=engine)
+        print("--- Database tables initialized successfully ---")
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+
+if __name__ == "__main__":
+    # Running this file directly will initialize the DB
+    init_db()
