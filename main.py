@@ -5,6 +5,7 @@ Created on Wed Jan  7 22:15:13 2026
 @author: hahnj
 """
 
+from contextlib import asynccontextmanager 
 from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -74,3 +75,4 @@ async def lifespan(app: FastAPI):
 
 # This serves your HTML file from a folder named "static"
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
